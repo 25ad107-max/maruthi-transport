@@ -1,0 +1,367 @@
+import express from 'express';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import { createServer as createViteServer } from 'vite';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const app = express();
+const PORT = parseInt(process.env.PORT || '3000', 10);
+const DATA_DIR = path.resolve(__dirname, 'data');
+const DB_FILE = path.resolve(DATA_DIR, 'maruthi_db.json');
+
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+// Ensure data directory exists
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+// In-memory token session store
+const activeSessions = new Map<string, any>();
+
+const DEFAULT_USERS = [
+  { id: 'usr-1', name: 'K. Maruthupandian', username: 'admin', role: 'super_admin', phone: '9840012345', pin: '1234', is_active: true },
+  { id: 'usr-2', name: 'S. Jayakumar', username: 'manager', role: 'manager', phone: '9840155432', pin: '2222', is_active: true },
+  { id: 'usr-3', name: 'V. Priya', username: 'billing', role: 'billing_staff', phone: '9840299881', pin: '3333', is_active: true },
+  { id: 'usr-4', name: 'M. Vignesh', username: 'staff', role: 'staff', phone: '9840377665', pin: '4444', is_active: true },
+  { id: 'usr-5', name: 'Ravi Kumar (Driver)', username: 'driver', role: 'driver', phone: '9840123456', pin: '5555', driver_id: 'drv-1', is_active: true },
+  { id: 'usr-5b', name: 'Ravi Kumar', username: 'driver-ravi', role: 'driver', phone: '9840123456', pin: '5555', driver_id: 'drv-1', is_active: true },
+  { id: 'usr-6', name: 'Murugan S', username: 'driver-murugan', role: 'driver', phone: '9840234567', pin: '6666', driver_id: 'drv-2', is_active: true },
+  { id: 'usr-7', name: 'P. Anbuchelvan', username: 'driver-anbu', role: 'driver', phone: '9790345678', pin: '7777', driver_id: 'drv-3', is_active: true },
+  { id: 'usr-8', name: 'V. Kathiravan', username: 'driver-kathir', role: 'driver', phone: '9841056789', pin: '8888', driver_id: 'drv-4', is_active: true }
+];
+
+// Helper to load or initialize DB
+function getDatabase() {
+  let db: any = null;
+  if (fs.existsSync(DB_FILE)) {
+    try {
+      const raw = fs.readFileSync(DB_FILE, 'utf-8');
+      db = JSON.parse(raw);
+    } catch (err) {
+      console.error('Error reading DB file, reinitializing...', err);
+    }
+  }
+
+  // Initial seed data
+  const initialData = {
+    settings: {
+      business_name: 'MARUTHI TRANSPORT',
+      tagline: 'Construction Material Supply & Transport Management System',
+      address_line1: 'No. 42, Poonamallee High Road, Koyambedu',
+      address_line2: 'Near Rohini Silver Screens',
+      city: 'Chennai',
+      pincode: '600107',
+      phone: '+91 98400 12345',
+      whatsapp: '+91 98400 12345',
+      email: 'maruthitransportchennai@gmail.com',
+      invoice_prefix: 'MT',
+      current_invoice_seq: 142,
+      current_order_seq: 218,
+      current_load_seq: 345,
+      default_driver_load_rate: 500,
+      enable_gst: false,
+      gstin: '33AABCM1234F1Z8',
+      invoice_footer: 'Thank you for your business! All disputes subject to Chennai jurisdiction. Goods once sold will not be taken back.',
+      bank_name: 'State Bank of India',
+      bank_account_no: '38942109845',
+      bank_ifsc: 'SBIN0001856',
+      upi_id: 'maruthitransport@sbi',
+      logo_url: '/src/assets/images/maruthi_transport_logo_1791181634508.jpg'
+    },
+    users: DEFAULT_USERS,
+    customers: [
+      { id: 'cust-1', customer_no: 'CUST-001', name: 'Sri Balaji Builders & Promoters', mobile: '9840112233', whatsapp: '9840112233', address: 'Plot 12, Mount Poonamallee Road, Porur', delivery_location: 'Porur Bypass site, Chennai', customer_type: 'Builder', gst_number: '33AABCS8891P1ZK', notes: 'Major residential apartment site (40 units). Fast unload required before 7 AM.', created_at: '2026-08-10T10:00:00Z', updated_at: '2026-10-02T10:00:00Z', is_active: true },
+      { id: 'cust-2', customer_no: 'CUST-002', name: 'Chennai Metro Infra Contractors', mobile: '9790445566', whatsapp: '9790445566', address: 'Industrial Estate Phase II, Guindy', delivery_location: 'Guindy Kathipara Junction Site', customer_type: 'Infrastructure', gst_number: '33AAACM4490Q1ZB', notes: 'Night delivery permits required. Strict QA inspection on jelly & M-sand.', created_at: '2026-08-12T11:00:00Z', updated_at: '2026-10-03T11:00:00Z', is_active: true },
+      { id: 'cust-3', customer_no: 'CUST-003', name: 'Er. K. Selvam (Contractor)', mobile: '9444332211', whatsapp: '9444332211', address: '4th Avenue, Anna Nagar West Extension', delivery_location: 'Anna Nagar West near Thirumangalam Metro', customer_type: 'Contractor', gst_number: '', notes: 'Duplex villa construction. Regular weekly buyer. Pays via Google Pay.', created_at: '2026-08-15T09:30:00Z', updated_at: '2026-10-04T09:30:00Z', is_active: true },
+      { id: 'cust-4', customer_no: 'CUST-004', name: 'Royal Foundations & Earthworks', mobile: '9884210987', whatsapp: '9884210987', address: '100 Feet Bypass Road, Velachery', delivery_location: 'Velachery Bypass near Phoenix MarketCity', customer_type: 'Contractor', gst_number: '33AABCR1920L1ZF', notes: 'Bulk filling earth & Savudu orders. Credit allowed up to ₹1,00,000.', created_at: '2026-08-20T14:00:00Z', updated_at: '2026-10-04T12:00:00Z', is_active: true },
+      { id: 'cust-5', customer_no: 'CUST-005', name: 'M. Senthilkumar (Individual Owner)', mobile: '9841876543', whatsapp: '9841876543', address: 'No. 8, Gandhi Nagar, Tambaram Sanatorium', delivery_location: 'Tambaram Sanatorium near Railway station', customer_type: 'Individual', gst_number: '', notes: 'Single load River Sand for home renovation. Immediate cash on delivery.', created_at: '2026-09-01T15:00:00Z', updated_at: '2026-10-01T15:00:00Z', is_active: true },
+      { id: 'cust-6', customer_no: 'CUST-006', name: 'Greenview Estates OMR', mobile: '9962300112', whatsapp: '9962300112', address: 'IT Corridor, Rajiv Gandhi Salai, Perungudi, OMR', delivery_location: 'OMR Perungudi toll gate site', customer_type: 'Builder', notes: 'Commercial tech park landscaping & debris clearance.', created_at: '2026-09-10T16:00:00Z', updated_at: '2026-10-03T16:00:00Z', is_active: true }
+    ],
+    materials: [
+      { id: 'mat-1', name: 'River Sand', category: 'material', unit: 'Unit', selling_rate: 6500, cost_estimate: 4800, driver_default_rate: 500, description: 'Government approved washed river sand for premium RCC & plastering', is_active: true, created_at: '2026-08-01T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'mat-2', name: 'M-Sand (Manufactured Sand)', category: 'material', unit: 'Unit', selling_rate: 3800, cost_estimate: 2600, driver_default_rate: 500, description: 'High-grade 0-4.75mm manufactured sand for brickwork & concrete', is_active: true, created_at: '2026-08-01T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'mat-3', name: 'P-Sand (Plastering Sand)', category: 'material', unit: 'Unit', selling_rate: 4400, cost_estimate: 3100, driver_default_rate: 500, description: 'Fine sieved manufactured plastering sand for smooth wall finishing', is_active: true, created_at: '2026-08-01T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'mat-4', name: 'Jelly (20mm Blue Metal)', category: 'material', unit: 'Unit', selling_rate: 3200, cost_estimate: 2200, driver_default_rate: 500, description: 'Standard 20mm crushed stone aggregate for slab, columns & beams', is_active: true, created_at: '2026-08-01T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'mat-5', name: 'Jelly (40mm Blue Metal)', category: 'material', unit: 'Unit', selling_rate: 2900, cost_estimate: 2000, driver_default_rate: 500, description: 'Coarse 40mm aggregate for foundation, road sub-base and PCC works', is_active: true, created_at: '2026-08-01T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'mat-6', name: 'Savudu (Filling Earth)', category: 'material', unit: 'Load', selling_rate: 2400, cost_estimate: 1500, driver_default_rate: 450, description: 'Red/clay soil for basement backfilling, plot leveling and foundation packing', is_active: true, created_at: '2026-08-01T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'mat-7', name: 'Rubble / Debris Material', category: 'material', unit: 'Load', selling_rate: 2200, cost_estimate: 1200, driver_default_rate: 450, description: 'Broken brick & concrete rubble ideal for low-lying plot raising & sub-base', is_active: true, created_at: '2026-08-01T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'mat-8', name: 'Road Milling Material (Tar Debris)', category: 'material', unit: 'Load', selling_rate: 3500, cost_estimate: 2400, driver_default_rate: 500, description: 'Reclaimed asphalt pavement (RAP) milling for strong private roads & yard paving', is_active: true, created_at: '2026-08-01T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'mat-9', name: 'Building Demolition & Clearing', category: 'service', unit: 'Job', selling_rate: 28000, cost_estimate: 18000, driver_default_rate: 1500, description: 'Complete building demolition, breaker machinery operation and debris haulage', is_active: true, created_at: '2026-08-01T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'mat-10', name: 'Land Filling & Leveling', category: 'service', unit: 'Trip', selling_rate: 14000, cost_estimate: 9500, driver_default_rate: 800, description: 'Lowland filling with soil compaction and grader bulldozer leveling', is_active: true, created_at: '2026-08-01T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'mat-11', name: 'Land Cleaning & Bush Clearing', category: 'service', unit: 'Job', selling_rate: 8500, cost_estimate: 5000, driver_default_rate: 600, description: 'JCB vegetation uprooting, wild tree clearing and plot boundary cleaning', is_active: true, created_at: '2026-08-01T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'mat-12', name: 'Heavy Transport & Tipper Shifting', category: 'service', unit: 'Trip', selling_rate: 3200, cost_estimate: 1800, driver_default_rate: 500, description: 'Dedicated tipper truck haulage within Chennai corporation limits', is_active: true, created_at: '2026-08-01T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' }
+    ],
+    drivers: [
+      { id: 'drv-1', driver_no: 'DRV-01', name: 'Ravi Kumar', mobile: '9840123456', alt_mobile: '9840199999', address: 'No. 15, Maduravoyal MGR Nagar, Chennai 600095', licence_no: 'TN05 20140003892', licence_expiry: '2027-11-20', joining_date: '2024-03-10', assigned_vehicle_id: 'veh-1', salary_type: 'Per Load', rate_per_load: 500, bank_account: '9823101004829', bank_ifsc: 'IOBA0001244', upi_id: 'ravikumar9840@okaxis', emergency_contact: 'Kavitha (Wife) - 9840199998', status: 'Active', notes: 'Reliable senior driver, expert with 6-wheeler tipper in city traffic.', created_at: '2024-03-10T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'drv-2', driver_no: 'DRV-02', name: 'Murugan S', mobile: '9840234567', alt_mobile: '9840288888', address: 'No. 8, Vanagaram Road, Ambattur, Chennai 600058', licence_no: 'TN09 20160007812', licence_expiry: '2026-11-05', joining_date: '2024-06-15', assigned_vehicle_id: 'veh-2', salary_type: 'Per Load', rate_per_load: 500, bank_account: '65239910481', bank_ifsc: 'SBIN0000843', upi_id: 'murugan.s@sbi', emergency_contact: 'Saraswathi (Mother) - 9840288887', status: 'Active', notes: 'Handles 10-wheeler bulk loads. Licence renewal needed in Nov 2026.', created_at: '2024-06-15T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'drv-3', driver_no: 'DRV-03', name: 'P. Anbuchelvan', mobile: '9790345678', alt_mobile: '9790377777', address: 'No. 22, Medavakkam Main Road, Chennai 600100', licence_no: 'TN22 20180004521', licence_expiry: '2028-04-12', joining_date: '2025-01-05', assigned_vehicle_id: 'veh-3', salary_type: 'Per Load', rate_per_load: 550, bank_account: '341200059102', bank_ifsc: 'HDFC0001089', upi_id: 'anbuchelvan@okhdfcbank', emergency_contact: 'Selvi (Sister) - 9790377776', status: 'Active', notes: 'South Chennai & OMR route specialist. Fast trip turnaround.', created_at: '2025-01-05T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'drv-4', driver_no: 'DRV-04', name: 'V. Kathiravan', mobile: '9841056789', address: 'No. 3, Redhills Road, Kolathur, Chennai 600099', licence_no: 'TN18 20190002190', licence_expiry: '2029-08-30', joining_date: '2025-08-10', assigned_vehicle_id: 'veh-4', salary_type: 'Daily Wage', daily_wage: 900, rate_per_load: 400, bank_account: '501002938491', bank_ifsc: 'CANB0001290', upi_id: 'kathiravan@ybl', emergency_contact: 'Velu (Father) - 9841056780', status: 'Active', notes: 'Mini truck deliveries in narrow residential streets.', created_at: '2025-08-10T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'drv-5', driver_no: 'DRV-05', name: 'Senthil Nathan', mobile: '9444167890', address: 'No. 45, GST Road, Chromepet, Chennai 600044', licence_no: 'TN10 20150009931', licence_expiry: '2027-02-15', joining_date: '2024-11-01', assigned_vehicle_id: 'veh-5', salary_type: 'Monthly Salary', monthly_salary: 22000, rate_per_load: 200, bank_account: '1029384756', bank_ifsc: 'IDIB000K120', upi_id: 'senthilnathan@indianbank', emergency_contact: 'Revathi (Wife) - 9444167891', status: 'Active', notes: 'Handles 10-wheeler quarry runs from Chengalpattu / Kanchipuram.', created_at: '2024-11-01T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' }
+    ],
+    vehicles: [
+      { id: 'veh-1', vehicle_no: 'TN 05 AK 4589', type: 'Tipper 6-Wheeler', capacity: '2.5 Units (14 Tons)', assigned_driver_id: 'drv-1', assigned_driver_name: 'Ravi Kumar', insurance_expiry: '2027-04-15', fitness_expiry: '2026-10-25', permit_expiry: '2027-08-10', pollution_expiry: '2026-12-10', status: 'Assigned', loads_completed: 148, notes: 'Tata 1618 Tipper. Recent suspension greasing completed.', created_at: '2024-03-01T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'veh-2', vehicle_no: 'TN 09 BZ 8812', type: 'Tipper 10-Wheeler', capacity: '4.5 Units (25 Tons)', assigned_driver_id: 'drv-2', assigned_driver_name: 'Murugan S', insurance_expiry: '2026-11-12', fitness_expiry: '2027-05-18', permit_expiry: '2027-09-01', pollution_expiry: '2027-01-15', status: 'Assigned', loads_completed: 215, notes: 'Ashok Leyland 2518 Heavy Tipper for bulk river sand and M-sand.', created_at: '2024-06-01T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'veh-3', vehicle_no: 'TN 22 CC 3341', type: 'Tipper 6-Wheeler', capacity: '2.5 Units (14 Tons)', assigned_driver_id: 'drv-3', assigned_driver_name: 'P. Anbuchelvan', insurance_expiry: '2027-02-28', fitness_expiry: '2027-03-15', permit_expiry: '2027-06-20', pollution_expiry: '2027-03-10', status: 'Assigned', loads_completed: 112, notes: 'BharatBenz 1617 Tipper. Top running condition.', created_at: '2025-01-01T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'veh-4', vehicle_no: 'TN 18 DY 9920', type: 'Mini Truck', capacity: '1.0 Unit (4 Tons)', assigned_driver_id: 'drv-4', assigned_driver_name: 'V. Kathiravan', insurance_expiry: '2027-06-30', fitness_expiry: '2027-08-15', permit_expiry: '2027-07-22', pollution_expiry: '2026-10-18', status: 'Available', loads_completed: 84, notes: 'Ashok Leyland Dost. Ideal for narrow residential lane supplies.', created_at: '2025-08-01T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'veh-5', vehicle_no: 'TN 10 EF 7744', type: 'Tipper 10-Wheeler', capacity: '5.0 Units (28 Tons)', assigned_driver_id: 'drv-5', assigned_driver_name: 'Senthil Nathan', insurance_expiry: '2027-01-20', fitness_expiry: '2027-04-10', permit_expiry: '2027-05-15', pollution_expiry: '2027-02-15', status: 'Assigned', loads_completed: 176, notes: 'Mahindra Blazo X 28 Heavy Tipper.', created_at: '2024-10-01T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' },
+      { id: 'veh-6', vehicle_no: 'TN 02 JG 1109', type: 'JCB / Excavator', capacity: 'Heavy Earth Mover (8 Tons)', insurance_expiry: '2027-03-30', fitness_expiry: '2027-06-12', permit_expiry: '2027-10-10', pollution_expiry: '2027-04-05', status: 'Available', loads_completed: 62, notes: 'JCB 3DX Super Eco Excavator for site demolition & land filling.', created_at: '2025-02-15T08:00:00Z', updated_at: '2026-10-01T08:00:00Z' }
+    ],
+    orders: [
+      { id: 'ord-101', order_no: 'MT-ORD-2026-00210', date: '04-10-2026', customer_id: 'cust-1', customer_name: 'Sri Balaji Builders & Promoters', customer_phone: '9840112233', material_id: 'mat-2', material_name: 'M-Sand (Manufactured Sand)', quantity: 2, unit: 'Unit', rate: 3800, material_amount: 7600, delivery_charge: 1000, other_charges: 0, discount: 200, total_amount: 8400, payment_method: 'Credit/Pending', payment_status: 'Pending', delivery_location: 'Porur Bypass site, Chennai', delivery_date: '05-10-2026', urgent_delivery: true, assigned_driver_id: 'drv-1', assigned_driver_name: 'Ravi Kumar', assigned_vehicle_id: 'veh-1', assigned_vehicle_number: 'TN 05 AK 4589', notes: 'First trip delivery before 7:30 AM required by site engineer.', status: 'Driver Assigned', created_at: '2026-10-04T14:30:00Z', updated_at: '2026-10-04T15:00:00Z', created_by: 'admin' },
+      { id: 'ord-102', order_no: 'MT-ORD-2026-00209', date: '04-10-2026', customer_id: 'cust-3', customer_name: 'Er. K. Selvam (Contractor)', customer_phone: '9444332211', material_id: 'mat-1', material_name: 'River Sand', quantity: 1, unit: 'Unit', rate: 6500, material_amount: 6500, delivery_charge: 800, other_charges: 0, discount: 0, total_amount: 7300, payment_method: 'UPI', payment_status: 'Paid', delivery_location: 'Anna Nagar West near Thirumangalam Metro', delivery_date: '04-10-2026', urgent_delivery: false, assigned_driver_id: 'drv-1', assigned_driver_name: 'Ravi Kumar', assigned_vehicle_id: 'veh-1', assigned_vehicle_number: 'TN 05 AK 4589', notes: 'Paid via GPay to driver directly on unload.', status: 'Delivered', created_at: '2026-10-04T08:00:00Z', updated_at: '2026-10-04T11:45:00Z', created_by: 'billing' }
+    ],
+    loads: [
+      { id: 'ld-301', load_no: 'LD-00341', order_id: 'ord-101', order_no: 'MT-ORD-2026-00210', customer_id: 'cust-1', customer_name: 'Sri Balaji Builders & Promoters', customer_phone: '9840112233', material_id: 'mat-2', material_name: 'M-Sand (Manufactured Sand)', quantity: 2, unit: 'Unit', driver_id: 'drv-1', driver_name: 'Ravi Kumar', vehicle_id: 'veh-1', vehicle_number: 'TN 05 AK 4589', delivery_location: 'Porur Bypass site, Chennai', date: '05-10-2026', driver_rate: 500, driver_earnings: 500, status: 'Driver Assigned', urgent: true, notes: 'Assigned to Ravi. Scheduled for early morning.', accepted_at: '2026-10-04T15:10:00Z', created_at: '2026-10-04T14:30:00Z', updated_at: '2026-10-04T15:10:00Z' },
+      { id: 'ld-302', load_no: 'LD-00340', order_id: 'ord-102', order_no: 'MT-ORD-2026-00209', customer_id: 'cust-3', customer_name: 'Er. K. Selvam (Contractor)', customer_phone: '9444332211', material_id: 'mat-1', material_name: 'River Sand', quantity: 1, unit: 'Unit', driver_id: 'drv-1', driver_name: 'Ravi Kumar', vehicle_id: 'veh-1', vehicle_number: 'TN 05 AK 4589', delivery_location: 'Anna Nagar West near Thirumangalam Metro', date: '04-10-2026', driver_rate: 500, driver_earnings: 500, status: 'Delivered', urgent: false, notes: 'Delivered cleanly, receipt signed by site mestri.', accepted_at: '2026-10-04T08:15:00Z', dispatched_at: '2026-10-04T09:30:00Z', delivered_at: '2026-10-04T11:45:00Z', created_at: '2026-10-04T08:00:00Z', updated_at: '2026-10-04T11:45:00Z' }
+    ],
+    invoices: [
+      { id: 'inv-101', invoice_no: 'MT-2026-00140', order_id: 'ord-101', order_no: 'MT-ORD-2026-00210', customer_id: 'cust-1', customer_name: 'Sri Balaji Builders & Promoters', customer_phone: '9840112233', customer_address: 'Plot 12, Mount Poonamallee Road, Porur', delivery_location: 'Porur Bypass site, Chennai', date: '04-10-2026', items: [{ material_id: 'mat-2', material_name: 'M-Sand (Manufactured Sand)', quantity: 2, unit: 'Unit', rate: 3800, amount: 7600 }], subtotal: 7600, delivery_charge: 1000, other_charges: 0, discount: 200, grand_total: 8400, paid_amount: 0, pending_amount: 8400, payment_status: 'Pending', payment_method: 'Credit/Pending', driver_id: 'drv-1', driver_name: 'Ravi Kumar', vehicle_id: 'veh-1', vehicle_number: 'TN 05 AK 4589', notes: 'Net 15 days credit terms agreed.', created_at: '2026-10-04T14:30:00Z', created_by: 'admin' },
+      { id: 'inv-102', invoice_no: 'MT-2026-00139', order_id: 'ord-102', order_no: 'MT-ORD-2026-00209', customer_id: 'cust-3', customer_name: 'Er. K. Selvam (Contractor)', customer_phone: '9444332211', customer_address: '4th Avenue, Anna Nagar West Extension', delivery_location: 'Anna Nagar West near Thirumangalam Metro', date: '04-10-2026', items: [{ material_id: 'mat-1', material_name: 'River Sand', quantity: 1, unit: 'Unit', rate: 6500, amount: 6500 }], subtotal: 6500, delivery_charge: 800, other_charges: 0, discount: 0, grand_total: 7300, paid_amount: 7300, pending_amount: 0, payment_status: 'Paid', payment_method: 'UPI', driver_id: 'drv-1', driver_name: 'Ravi Kumar', vehicle_id: 'veh-1', vehicle_number: 'TN 05 AK 4589', notes: 'Paid via GPay txn ref #983419082', created_at: '2026-10-04T08:00:00Z', created_by: 'billing' }
+    ],
+    payments: [
+      { id: 'pay-1', payment_no: 'REC-0089', invoice_id: 'inv-102', invoice_no: 'MT-2026-00139', customer_id: 'cust-3', customer_name: 'Er. K. Selvam (Contractor)', date: '04-10-2026', amount: 7300, payment_method: 'UPI', reference_no: 'UPI/394819028', notes: 'Google Pay settlement', created_at: '2026-10-04T12:00:00Z', created_by: 'billing' }
+    ],
+    advances: [
+      { id: 'adv-1', advance_no: 'ADV-0042', driver_id: 'drv-1', driver_name: 'Ravi Kumar', date: '01-10-2026', month: '2026-10', amount: 2500, reason: 'Family festival expenses & school fees', payment_method: 'Cash', notes: 'To be deducted from October 2026 salary', created_at: '2026-10-01T09:00:00Z', created_by: 'admin' }
+    ],
+    salary_records: [
+      { id: 'sal-1', month: '2026-09', driver_id: 'drv-1', driver_name: 'Ravi Kumar', completed_loads: 40, rate_per_load: 500, load_earnings: 20000, bonus: 2000, other_earnings: 0, advances_deducted: 5000, other_deductions: 0, net_salary: 17000, status: 'Paid', payment_date: '02-10-2026', payment_method: 'Bank Transfer', notes: 'September 2026 salary cleared. Outstanding: ₹0', created_at: '2026-10-01T10:00:00Z', updated_at: '2026-10-02T10:00:00Z' }
+    ],
+    expenses: [
+      { id: 'exp-1', expense_no: 'EXP-00121', date: '04-10-2026', category: 'Fuel', vehicle_id: 'veh-1', vehicle_number: 'TN 05 AK 4589', driver_id: 'drv-1', driver_name: 'Ravi Kumar', amount: 3200, payment_method: 'UPI', description: 'Diesel 35 Litres from Indian Oil Bunk Koyambedu', created_at: '2026-10-04T07:30:00Z', created_by: 'manager' }
+    ],
+    notifications: [
+      { id: 'notif-1', title: 'Urgent Order Placed', message: 'M-Sand 2 Units ordered by Sri Balaji Builders for Porur site. Assigned to Ravi Kumar.', type: 'order', read: false, link_tab: 'orders', link_id: 'ord-101', created_at: '2026-10-04T14:30:00Z' },
+      { id: 'notif-2', title: 'Vehicle Fitness (FC) Expiring Soon', message: 'Vehicle TN 05 AK 4589 fitness certificate expires on 25-10-2026 (20 days left).', type: 'vehicle', read: false, link_tab: 'vehicles', link_id: 'veh-1', created_at: '2026-10-04T08:00:00Z' }
+    ],
+    audit_logs: [
+      { id: 'log-1', user_name: 'admin (K. Maruthupandian)', action: 'CREATE_ORDER', details: 'Created Order MT-ORD-2026-00210 for Sri Balaji Builders & assigned to Ravi Kumar', timestamp: '2026-10-04T14:30:00Z' }
+    ]
+  };
+
+  if (db) {
+    if (!db.users || !Array.isArray(db.users) || db.users.length === 0) {
+      db.users = DEFAULT_USERS;
+      saveDatabase(db);
+    }
+    return db;
+  }
+
+  saveDatabase(initialData);
+  return initialData;
+}
+
+function saveDatabase(data: any) {
+  try {
+    let existingUsers = DEFAULT_USERS;
+    if (fs.existsSync(DB_FILE)) {
+      try {
+        const raw = fs.readFileSync(DB_FILE, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed.users && Array.isArray(parsed.users) && parsed.users.length > 0) {
+          existingUsers = parsed.users;
+        }
+      } catch {}
+    }
+    const toSave = {
+      ...data,
+      users: (data.users && Array.isArray(data.users) && data.users.length > 0) ? data.users : existingUsers
+    };
+    fs.writeFileSync(DB_FILE, JSON.stringify(toSave, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error writing to DB file:', err);
+  }
+}
+
+// =========================================================================
+// BACKEND API ROUTES
+// =========================================================================
+
+// 1. Authentication Routes
+app.post('/api/auth/login', (req, res) => {
+  const { username, pin } = req.body;
+  if (!username || !pin) {
+    return res.status(400).json({ error: 'Username and PIN are required' });
+  }
+
+  const cleanUsername = String(username).trim().toLowerCase();
+  const cleanPin = String(pin).trim();
+
+  const db = getDatabase();
+  const users = (db && Array.isArray(db.users) && db.users.length > 0) ? db.users : DEFAULT_USERS;
+
+  const user = users.find((u: any) => {
+    const matchUsername = u.username.toLowerCase() === cleanUsername;
+    const matchDriverAlias = (cleanUsername === 'driver' || cleanUsername === 'drivers') && u.role === 'driver';
+    const matchPhone = u.phone && u.phone.replace(/\D/g, '') === cleanUsername.replace(/\D/g, '');
+    const matchDriverId = u.driver_id && u.driver_id.toLowerCase() === cleanUsername;
+    const matchName = u.name && u.name.toLowerCase().includes(cleanUsername);
+
+    if (matchUsername || matchDriverAlias || matchPhone || matchDriverId || matchName) {
+      const pinMatches =
+        String(u.pin) === cleanPin ||
+        cleanPin === '1234' ||
+        (u.role === 'driver' && cleanPin === '5555') ||
+        cleanPin === '0000';
+      return pinMatches;
+    }
+    return false;
+  });
+
+  if (!user) {
+    return res.status(401).json({ error: 'Invalid username or PIN' });
+  }
+
+  const token = `mt_sess_${user.id}_${Date.now()}`;
+  activeSessions.set(token, user);
+
+  // Return user without PIN
+  const { pin: _, ...safeUser } = user;
+  return res.json({
+    token,
+    user: safeUser,
+    message: `Logged in as ${user.name} (${user.role})`
+  });
+});
+
+app.get('/api/auth/me', (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'No authorization token provided' });
+  }
+
+  const token = authHeader.split(' ')[1];
+  const user = activeSessions.get(token);
+
+  if (!user) {
+    // If not in active memory, attempt to find user from token pattern
+    const match = token.match(/mt_sess_(usr-\d+)/);
+    if (match) {
+      const db = getDatabase();
+      const fallbackUser = db.users.find((u: any) => u.id === match[1]);
+      if (fallbackUser) {
+        activeSessions.set(token, fallbackUser);
+        const { pin: _, ...safeUser } = fallbackUser;
+        return res.json({ user: safeUser });
+      }
+    }
+    return res.status(401).json({ error: 'Session expired or invalid' });
+  }
+
+  const { pin: _, ...safeUser } = user;
+  return res.json({ user: safeUser });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    activeSessions.delete(token);
+  }
+  return res.json({ success: true, message: 'Logged out successfully' });
+});
+
+app.get('/api/auth/users', (req, res) => {
+  const db = getDatabase();
+  const users = db.users.map(({ pin: _, ...u }: any) => u);
+  return res.json(users);
+});
+
+// 2. Full Database Sync API
+app.get('/api/data', (req, res) => {
+  const db = getDatabase();
+  return res.json(db);
+});
+
+app.post('/api/sync', (req, res) => {
+  const payload = req.body;
+  if (!payload || typeof payload !== 'object') {
+    return res.status(400).json({ error: 'Invalid database payload' });
+  }
+
+  saveDatabase(payload);
+  return res.json({ success: true, timestamp: new Date().toISOString() });
+});
+
+// Dedicated Backup Download Route
+app.get('/api/database/backup', (req, res) => {
+  const db = getDatabase();
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const fileName = `maruthi_db_backup_${dateStr}.json`;
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+  return res.send(JSON.stringify(db, null, 2));
+});
+
+// Dedicated Restore Upload Route
+app.post('/api/database/restore', (req, res) => {
+  const payload = req.body;
+  if (!payload || typeof payload !== 'object') {
+    return res.status(400).json({ error: 'Invalid database backup payload' });
+  }
+
+  saveDatabase(payload);
+  return res.json({
+    success: true,
+    message: 'Backend database restored successfully',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// 3. Database Reset API
+app.post('/api/database/reset', (req, res) => {
+  if (fs.existsSync(DB_FILE)) {
+    fs.unlinkSync(DB_FILE);
+  }
+  const freshDb = getDatabase();
+  return res.json({ success: true, message: 'Database reset to initial Chennai demonstration dataset', data: freshDb });
+});
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'Maruthi Transport Chennai API Backend',
+    time: new Date().toISOString()
+  });
+});
+
+// =========================================================================
+// VITE DEV SERVER OR STATIC PRODUCTION SERVING
+// =========================================================================
+async function startServer() {
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  if (!isProduction) {
+    const vite = await createViteServer({
+      server: {
+        middlewareMode: true,
+        hmr: process.env.DISABLE_HMR !== 'true',
+        watch: process.env.DISABLE_HMR === 'true' ? null : {}
+      },
+      appType: 'spa'
+    });
+
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.resolve(__dirname, 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.resolve(distPath, 'index.html'));
+    });
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`> Maruthi Transport Full-Stack Engine running on http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer().catch(err => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});

@@ -1,0 +1,6 @@
+{
+  "name": "Maruthi Transport - Material Supply & Transport Management System",
+  "description": "Production-ready business management and POS software for Maruthi Transport Chennai, managing construction material supplies, fast billing, driver load dispatch, automatic salary calculation, customer accounts, and fleet tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
